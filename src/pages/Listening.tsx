@@ -10,6 +10,7 @@ import {
   type ListeningPassage,
   type PassageType,
 } from "@/data/listening_passages";
+import { speak, stopAll } from "@/lib/tts";
 
 // ─── TTS Player Hook ──────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
   const [currentSentenceIdx, setCurrentSentenceIdx] = useState(0);
   const cancelledRef = useRef(false);
   const currentIdxRef = useRef(0);
+  const stopCurrentRef = useRef<(() => void) | null>(null);
 
   // Sync ref with state
   useEffect(() => {
@@ -26,7 +28,8 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
 
   const stop = useCallback(() => {
     cancelledRef.current = true;
-    window.speechSynthesis?.cancel();
+    stopCurrentRef.current?.();
+    stopAll();
     setIsPlaying(false);
   }, []);
 
@@ -43,19 +46,16 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
         }
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(sentences[idx]);
-      utterance.lang = "en-US";
-      utterance.rate = rate;
-      utterance.onstart = () => {
-        if (!cancelledRef.current) setCurrentSentenceIdx(idx);
-      };
-      utterance.onend = () => {
-        if (!cancelledRef.current) playSentence(idx + 1, sentences);
-      };
-      utterance.onerror = () => {
-        if (!cancelledRef.current) setIsPlaying(false);
-      };
-      window.speechSynthesis.speak(utterance);
+      if (!cancelledRef.current) setCurrentSentenceIdx(idx);
+      const { stop: stopThis } = speak(sentences[idx], rate, {
+        onEnd: () => {
+          if (!cancelledRef.current) playSentence(idx + 1, sentences);
+        },
+        onError: () => {
+          if (!cancelledRef.current) setIsPlaying(false);
+        },
+      });
+      stopCurrentRef.current = stopThis;
     },
     [rate, isLooping]
   );
@@ -69,13 +69,15 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
 
   const pause = useCallback(() => {
     cancelledRef.current = true;
-    window.speechSynthesis?.cancel();
+    stopCurrentRef.current?.();
+    stopAll();
     setIsPlaying(false);
   }, []);
 
   const restart = useCallback(() => {
     cancelledRef.current = true;
-    window.speechSynthesis?.cancel();
+    stopCurrentRef.current?.();
+    stopAll();
     setCurrentSentenceIdx(0);
     currentIdxRef.current = 0;
     setTimeout(() => {
@@ -89,12 +91,11 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
   const playSingle = useCallback(
     (idx: number) => {
       if (!passage) return;
-      window.speechSynthesis?.cancel();
+      stopCurrentRef.current?.();
+      stopAll();
       setCurrentSentenceIdx(idx);
-      const utterance = new SpeechSynthesisUtterance(passage.sentences[idx]);
-      utterance.lang = "en-US";
-      utterance.rate = rate;
-      window.speechSynthesis.speak(utterance);
+      const { stop: stopThis } = speak(passage.sentences[idx], rate);
+      stopCurrentRef.current = stopThis;
     },
     [passage, rate]
   );
@@ -112,7 +113,8 @@ function usePassagePlayer(passage: ListeningPassage | null, rate: number, isLoop
       prevRateRef.current = rate;
       if (isPlaying && passage) {
         cancelledRef.current = true;
-        window.speechSynthesis?.cancel();
+        stopCurrentRef.current?.();
+        stopAll();
         const idx = currentIdxRef.current;
         setTimeout(() => {
           cancelledRef.current = false;

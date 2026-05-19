@@ -4,16 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { vocabularyData, type Word } from "@/data/vocabulary";
 import { cn } from "@/lib/utils";
 import { useStorage } from "@/hooks/useStorage";
-
-function speak(text: string) {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.8;
-    window.speechSynthesis.speak(utterance);
-  }
-}
+import { speak } from "@/lib/tts";
 
 type LevelFilter = "All" | Word["level"];
 

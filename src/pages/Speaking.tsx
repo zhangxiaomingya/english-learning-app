@@ -5,16 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getRandomWords } from "@/data/vocabulary";
 import { useStudyProgress } from "@/hooks/useStorage";
 import { cn } from "@/lib/utils";
-
-function speak(text: string) {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.75;
-    window.speechSynthesis.speak(utterance);
-  }
-}
+import { speak } from "@/lib/tts";
 
 export default function Speaking() {
   const [words] = useState(() => getRandomWords(15));
@@ -38,7 +29,7 @@ export default function Speaking() {
 
   const handleListen = useCallback(() => {
     if (!currentWord) return;
-    speak(currentWord.example);
+    speak(currentWord.example, 0.75);
   }, [currentWord]);
 
   const handleStartRecognition = useCallback(() => {
