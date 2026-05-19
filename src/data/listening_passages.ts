@@ -428,10 +428,21 @@ export const listeningPassages: ListeningPassage[] = [
   },
 ];
 
+import { listeningPassages2 } from "./listening_passages_2";
+import { listeningPassages3 } from "./listening_passages_3";
+import { listeningPassages4 } from "./listening_passages_4";
+
+export const allListeningPassages: ListeningPassage[] = [
+  ...listeningPassages,
+  ...listeningPassages2,
+  ...listeningPassages3,
+  ...listeningPassages4,
+];
+
 export function getPassagesByType(type: PassageType): ListeningPassage[] {
-  return listeningPassages.filter((p) => p.type === type);
+  return allListeningPassages.filter((p) => p.type === type);
 }
 
 export function getListeningPassageById(id: string): ListeningPassage | undefined {
-  return listeningPassages.find((p) => p.id === id);
+  return allListeningPassages.find((p) => p.id === id);
 }

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  listeningPassages,
+  allListeningPassages,
   PASSAGE_TYPE_LABELS,
   type ListeningPassage,
   type PassageType,
@@ -155,7 +155,7 @@ function PassageList({ onSelect }: { onSelect: (p: ListeningPassage) => void }) 
   const [filter, setFilter] = useState<PassageType | "All">("All");
 
   const filtered =
-    filter === "All" ? listeningPassages : listeningPassages.filter((p) => p.type === filter);
+    filter === "All" ? allListeningPassages : allListeningPassages.filter((p) => p.type === filter);
 
   const filterTabs: Array<PassageType | "All"> = ["All", "TED", "Celebrity", "Broadcast", "Daily"];
   const filterLabels: Record<PassageType | "All", string> = {
