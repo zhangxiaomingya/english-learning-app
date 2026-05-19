@@ -86,6 +86,7 @@ self.addEventListener("fetch", (event) => {
 }
 
 export default defineConfig({
+  base: '/english-learning-app/',
   plugins: [react(), injectSwPrecache()],
   resolve: {
     alias: {

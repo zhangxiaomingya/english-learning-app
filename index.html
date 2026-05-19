@@ -39,7 +39,7 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js')
+          navigator.serviceWorker.register('/english-learning-app/sw.js', { scope: '/english-learning-app/' })
             .then(function(reg) {
               console.log('[PWA] Service Worker registered:', reg.scope);
             })
