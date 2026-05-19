@@ -1,140 +1,180 @@
 /**
  * TTS (Text-to-Speech) 工具
- * 主方案：Google 翻译音频接口（免费，无需 Key，真人发音）
- * 降级方案：浏览器 Web Speech API
- *
- * 注意：直接将 URL 赋给 Audio.src，不使用 fetch，
- * 浏览器加载 <audio> 资源不受 CORS 限制。
+ * 使用浏览器内置 Web Speech API，自动选择最优音色：
+ *   - iOS/macOS: Samantha / Karen / Daniel（系统级高质量离线声音）
+ *   - Chrome:    Google US English（神经网络合成，音质好）
+ *   - 其他:      首个 en-US 声音
+ * 零延迟，无需网络，无需 API Key。
  */
 
-// 音频对象缓存
-const audioCache = new Map<string, HTMLAudioElement>();
+// 按优先级排列的期望声音名称
+const PREFERRED_VOICES = [
+  "Samantha",           // macOS / iOS 高质量美式女声
+  "Karen",              // macOS 澳式英语，自然
+  "Daniel",             // macOS 英式男声
+  "Google US English",  // Chrome 神经网络合成
+  "Microsoft Aria Online (Natural) - English (United States)", // Edge Neural
+  "Microsoft Guy Online (Natural) - English (United States)",
+  "en-US-Neural2",
+];
 
-function googleTranslateTTSUrl(text: string): string {
-  return `https://translate.googleapis.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=en-US&client=gtx&ttsspeed=1`;
-}
+let _bestVoice: SpeechSynthesisVoice | null = null;
+let _voicesLoaded = false;
 
 /**
- * 将长文本按句子边界分割成不超过 maxLen 字符的片段
+ * 从浏览器可用声音中挑选最优英语声音
  */
-function splitText(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-  const segments: string[] = [];
-  const sentences = text.match(/[^.!?]+[.!?]*/g) ?? [text];
-  let current = "";
-  for (const s of sentences) {
-    if (current.length > 0 && (current + s).length > maxLen) {
-      segments.push(current.trim());
-      current = s;
-    } else {
-      current += s;
+function getBestVoice(): SpeechSynthesisVoice | null {
+  if (_bestVoice) return _bestVoice;
+
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+
+  // 按优先列表匹配
+  for (const preferred of PREFERRED_VOICES) {
+    const match = voices.find((v) =>
+      v.name.toLowerCase().includes(preferred.toLowerCase())
+    );
+    if (match) {
+      _bestVoice = match;
+      return match;
     }
   }
-  if (current.trim()) segments.push(current.trim());
-  return segments.length > 0 ? segments : [text];
+
+  // 降级：优先 en-US 的本地声音
+  const localEnUS = voices.find((v) => v.lang === "en-US" && v.localService);
+  if (localEnUS) { _bestVoice = localEnUS; return localEnUS; }
+
+  // 再降级：任意 en-US
+  const anyEnUS = voices.find((v) => v.lang.startsWith("en"));
+  if (anyEnUS) { _bestVoice = anyEnUS; return anyEnUS; }
+
+  return null;
 }
 
 /**
- * 创建一个 Audio 对象，直接用 URL 作为 src（无 CORS 问题）
+ * 初始化：等待声音列表加载完成
+ * Chrome 需要等 voiceschanged 事件，iOS 同步可用
  */
-function makeAudio(text: string, rate: number): HTMLAudioElement {
-  const cached = audioCache.get(text);
-  if (cached) {
-    cached.playbackRate = Math.max(0.5, Math.min(2.0, rate));
-    cached.currentTime = 0;
-    return cached;
-  }
-  const audio = new Audio(googleTranslateTTSUrl(text));
-  audio.playbackRate = Math.max(0.5, Math.min(2.0, rate));
-  audioCache.set(text, audio);
-  return audio;
-}
-
-/**
- * 链式播放多个文本片段
- * 全部播放完后调用 onEnd，任意出错调用 onError
- */
-function playSegments(
-  segments: string[],
-  rate: number,
-  idx: number,
-  stopped: () => boolean,
-  onEnd: () => void,
-  onError: () => void
-): HTMLAudioElement {
-  const audio = makeAudio(segments[idx], rate);
-
-  audio.onended = () => {
-    if (stopped()) return;
-    if (idx + 1 < segments.length) {
-      playSegments(segments, rate, idx + 1, stopped, onEnd, onError);
-    } else {
-      onEnd();
+function initVoices(): Promise<void> {
+  if (_voicesLoaded) return Promise.resolve();
+  return new Promise((resolve) => {
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      _voicesLoaded = true;
+      resolve();
+      return;
     }
-  };
-
-  audio.onerror = () => {
-    if (!stopped()) onError();
-  };
-
-  audio.play().catch(() => {
-    if (!stopped()) onError();
+    const handler = () => {
+      _voicesLoaded = true;
+      window.speechSynthesis.removeEventListener("voiceschanged", handler);
+      resolve();
+    };
+    window.speechSynthesis.addEventListener("voiceschanged", handler);
+    // 超时保底（部分浏览器不触发 voiceschanged）
+    setTimeout(() => { _voicesLoaded = true; resolve(); }, 1000);
   });
+}
 
-  return audio;
+// 预加载声音列表
+if ("speechSynthesis" in window) {
+  initVoices();
+}
+
+// Chrome 长句静默 bug 修复：定期调用 resume() 防止被暂停
+let _resumeTimer: ReturnType<typeof setInterval> | null = null;
+
+function startResumeTimer() {
+  if (_resumeTimer) return;
+  _resumeTimer = setInterval(() => {
+    if (window.speechSynthesis?.speaking) {
+      window.speechSynthesis.resume();
+    } else {
+      stopResumeTimer();
+    }
+  }, 5000);
+}
+
+function stopResumeTimer() {
+  if (_resumeTimer) {
+    clearInterval(_resumeTimer);
+    _resumeTimer = null;
+  }
 }
 
 /**
- * 使用浏览器内置 Web Speech API（降级方案）
+ * 核心播放函数
  */
 function webSpeechSpeak(
   text: string,
   rate: number,
   onEnd: () => void,
   onError: () => void
-): void {
-  if (!("speechSynthesis" in window)) { onError(); return; }
+): () => void {
+  if (!("speechSynthesis" in window)) { onError(); return () => {}; }
+
   window.speechSynthesis.cancel();
+  stopResumeTimer();
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "en-US";
-  utterance.rate = rate;
-  utterance.onend = onEnd;
-  utterance.onerror = onError;
+  utterance.rate = Math.max(0.5, Math.min(2.0, rate));
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+
+  const voice = getBestVoice();
+  if (voice) utterance.voice = voice;
+
+  utterance.onstart = () => startResumeTimer();
+  utterance.onend = () => { stopResumeTimer(); onEnd(); };
+  utterance.onerror = (e) => {
+    stopResumeTimer();
+    // "interrupted" 是主动取消，不算错误
+    if ((e as SpeechSynthesisErrorEvent).error === "interrupted") return;
+    onError();
+  };
+
   window.speechSynthesis.speak(utterance);
+
+  return () => {
+    stopResumeTimer();
+    window.speechSynthesis.cancel();
+  };
 }
 
 /**
- * 统一 speak 接口
- * 优先 Google 翻译 TTS（直接 Audio src，无 CORS），失败降级到 Web Speech
+ * 统一 speak 接口，零延迟本地播放
+ * 返回 stop 函数用于中断播放
  */
 export function speak(
   text: string,
   rate: number = 1.0,
   callbacks?: { onEnd?: () => void; onError?: () => void }
 ): { stop: () => void } {
-  let currentAudio: HTMLAudioElement | null = null;
+  let cancelFn: (() => void) | null = null;
   let stopped = false;
-
-  const onEnd = () => { if (!stopped) callbacks?.onEnd?.(); };
-  const onError = () => {
-    if (stopped) return;
-    // Google 翻译失败 → 降级 Web Speech
-    webSpeechSpeak(text, rate, onEnd, () => { if (!stopped) callbacks?.onError?.(); });
-  };
 
   const stop = () => {
     stopped = true;
-    if (currentAudio) {
-      currentAudio.onended = null;
-      currentAudio.onerror = null;
-      currentAudio.pause();
-      currentAudio.currentTime = 0;
-    }
-    window.speechSynthesis?.cancel();
+    cancelFn?.();
   };
 
-  const segments = splitText(text, 200);
-  currentAudio = playSegments(segments, rate, 0, () => stopped, onEnd, onError);
+  const doSpeak = () => {
+    if (stopped) return;
+    cancelFn = webSpeechSpeak(
+      text,
+      rate,
+      () => { if (!stopped) callbacks?.onEnd?.(); },
+      () => { if (!stopped) callbacks?.onError?.(); }
+    );
+  };
+
+  // 确保声音列表已加载
+  if (_voicesLoaded) {
+    doSpeak();
+  } else {
+    initVoices().then(doSpeak);
+  }
 
   return { stop };
 }
@@ -143,5 +183,6 @@ export function speak(
  * 停止所有当前播放
  */
 export function stopAll() {
+  stopResumeTimer();
   window.speechSynthesis?.cancel();
 }
